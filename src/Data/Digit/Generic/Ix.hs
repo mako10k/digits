@@ -5,8 +5,6 @@ module Data.Digit.Generic.Ix
     fromIx,
     toIx,
     inRangeIx,
-    minBoundIx,
-    maxBoundIx,
   )
 where
 
@@ -21,11 +19,16 @@ toIx = Ix . fromIntegral
 fromIx :: (Integral int, Integral int') => Ix neg pos int -> int'
 fromIx (Ix ix) = fromIntegral ix
 
-inRangeIx :: (KnownNat neg, KnownNat pos, Integral int) => Ix neg pos int -> Bool
-inRangeIx ix = minBoundIx <= ix && ix <= maxBoundIx
+inRangeIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => Ix neg pos int -> Bool
+inRangeIx ix = minBound <= ix && ix <= maxBound
 
-minBoundIx :: forall neg pos int. (KnownNat neg, Integral int) => Ix neg pos int
-minBoundIx = -toIx (natVal (Proxy @neg))
+instance (KnownNat neg, KnownNat pos, Integral int) => Bounded (Ix neg pos int) where
+  minBound = Ix (-fromIntegral (natVal (Proxy @neg)))
+  maxBound = Ix (fromIntegral (natVal (Proxy @pos)))
 
-maxBoundIx :: forall neg pos int. (KnownNat pos, Integral int) => Ix neg pos int
-maxBoundIx = toIx (natVal (Proxy @pos))
+instance (KnownNat neg, KnownNat pos, Integral int) => Read (Ix neg pos int) where
+  readsPrec d s = do
+    (int :: Int, t) <- readsPrec d s
+    let ix :: Ix neg pos int = Ix (fromIntegral int)
+    True <- return $ inRangeIx ix
+    return (ix, t)
