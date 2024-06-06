@@ -1,6 +1,5 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Data.Digit where
-import Data.Function (on)
 
 class Digit d where
   {-# MINIMAL

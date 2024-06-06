@@ -1,82 +1,155 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
-module Data.Digit.Generic where
+module Data.Digit.Generic
+  ( GenDigit (),
+    pattern GenDigit,
+    toChar,
+    fromChar,
+    toGenDigit,
+    fromGenDigit,
+  )
+where
 
+import Control.Applicative (Alternative ((<|>)))
 import Data.Bifunctor (Bifunctor (first))
-import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isSpace)
 import Data.Digit
+  ( Digit
+      ( digitMax,
+        digitMin,
+        fromDigit,
+        fromDigits,
+        toDigit,
+        toDigits
+      ),
+  )
+import Data.Digit.Generic.Ix (Ix (Ix), inRangeIx, maxBoundIx, minBoundIx, toIx)
 import Data.Function (fix, on)
 import Data.Proxy (Proxy (Proxy))
-import GHC.TypeNats (KnownNat, natVal)
+import GHC.TypeNats (KnownNat)
 
-data GenDigit n m where
-  UnsafeGenDigit :: Int -> GenDigit n m
+data GenDigit neg pos where
+  -- | A digit in the range from @-neg@ to @pos@. (Do not use this constructor directly, use 'GenDigit' instead.)
+  UnsafeGenDigit :: forall neg pos int. (Integral int) => Ix neg pos int -> GenDigit neg pos
 
-pattern GenDigit :: forall n m. (KnownNat n, KnownNat m) => Int -> GenDigit n m
-pattern GenDigit i <- UnsafeGenDigit i
+pattern GenDigit :: forall neg pos ix. (KnownNat neg, KnownNat pos) => Ix neg pos ix -> GenDigit neg pos
+pattern GenDigit ix <- (fromGenDigit -> ix)
   where
-    GenDigit i = UnsafeGenDigit $ (i - genDigitMin (Proxy @(GenDigit n m))) `mod` genDigitCnt (Proxy @(GenDigit n m)) + genDigitMin (Proxy @(GenDigit n m))
+    GenDigit = toGenDigit
 
 {-# COMPLETE GenDigit #-}
 
-genDigitMin :: forall p c n m. (KnownNat n, KnownNat m) => p (c n m) -> Int
-genDigitMin _ = negate $ fromIntegral $ natVal (Proxy @n)
+toGenDigit :: forall neg pos int. (KnownNat neg, KnownNat pos) => Ix neg pos int -> GenDigit neg pos
+toGenDigit ix
+  | inRangeIx ix = UnsafeGenDigit ix
+  | otherwise = error "GenDigit: out of range"
 
-genDigitMax :: forall p c n m. (KnownNat n, KnownNat m) => p (c n m) -> Int
-genDigitMax _ = fromIntegral $ natVal (Proxy @m)
+fromGenDigit :: forall neg pos. (KnownNat neg, KnownNat pos) => GenDigit neg pos -> (forall int. Ix neg pos int)
+fromGenDigit (UnsafeGenDigit ix) = fromIntegral ix
 
-genDigitCnt :: forall p c n m. (KnownNat n, KnownNat m) => p (c n m) -> Int
-genDigitCnt p = genDigitMax p - genDigitMin p + 1
-
-instance (KnownNat n, KnownNat m) => Show (GenDigit n m) where
-  show (GenDigit i)
-    | 0 <= i && i < 10 = show i
-    | 10 <= i && i <= 36 = [toEnum $ (i - 10) + 65]
-    | -26 <= i && i < 0 = [toEnum $ 96 - i]
-    | otherwise = "(" ++ show i ++ ")"
+-- | Check if an integer is in the range of a 'GenDigit'.
+instance (KnownNat neg, KnownNat pos) => Show (GenDigit neg pos) where
+  show (GenDigit ix)
+    | 0 <= ix && ix <= 9 = show ix
+    | 10 <= ix && ix <= 36 = [toEnum $ fromEnum 'A' + fromIntegral ix - 10]
+    | -26 <= ix && ix <= -1 = [toEnum $ fromEnum 'a' - fromIntegral ix - 1]
+    | otherwise = "(" ++ show ix ++ ")"
   showList [] = showString "0"
-  showList xs = fix showDigits xs
+  showList xs = fix go xs
     where
-      showDigits _ [] = id
-      showDigits rec (y : ys) = rec ys . shows y
+      go _ [] = id
+      go f (y : ys) = f ys . shows y
 
-charToDigit :: Char -> Maybe Int
-charToDigit c
-  | isDigit c = Just $ fromEnum c - fromEnum '0'
-  | isAsciiUpper c = Just $ fromEnum c - fromEnum 'A' + 10
-  | isAsciiLower c = Just $ fromEnum 'a' - fromEnum c - 1
+toChar :: (KnownNat neg, KnownNat pos) => GenDigit neg pos -> Maybe Char
+toChar (GenDigit ix) = toCharFromIx ix
+
+fromChar :: (KnownNat neg, KnownNat pos) => Char -> Maybe (GenDigit neg pos)
+fromChar = fmap GenDigit . fromCharToIx
+
+toCharFromIx :: Ix neg pos int -> Maybe Char
+toCharFromIx digit = foldl1 (<|>) (map ($ digit) [toDigitCharFromIx, toAsciiUpperCharFromIx, toAsciiLowerCharFromIx])
+
+toDigitCharFromIx :: Ix neg pos int -> Maybe Char
+toDigitCharFromIx ix | 0 <= ix && ix <= 9 = Just $ toEnum $ fromEnum '0' + fromIntegral ix
+toDigitCharFromIx _ = Nothing
+
+toAsciiUpperCharFromIx :: Ix neg pos int -> Maybe Char
+toAsciiUpperCharFromIx ix | 10 <= ix && ix <= 36 = Just $ toEnum $ fromEnum 'A' + (fromIntegral ix - 10)
+toAsciiUpperCharFromIx _ = Nothing
+
+toAsciiLowerCharFromIx :: Ix neg pos int -> Maybe Char
+toAsciiLowerCharFromIx ix | -26 <= ix && ix <= -1 = Just $ toEnum $ fromEnum 'a' - (fromIntegral ix + 1)
+toAsciiLowerCharFromIx _ = Nothing
+
+fromDigitCharToIx :: Char -> (forall int. (Integral int) => Maybe (Ix neg pos int))
+fromDigitCharToIx ch
+  | isDigit ch && ix <= maxBoundIx = Just ix
+  | otherwise = Nothing
+  where
+    ix = toIx $ fromEnum ch - fromEnum '0'
+
+fromAsciiUpperCharToIx :: Char -> (forall int. (Integral int) => Maybe (Ix neg pos int))
+fromAsciiUpperCharToIx ch
+  | isAsciiUpper ch && ix <= maxBoundIx = Just ix
+  | otherwise = Nothing
+  where
+    ix = toIx $ fromEnum x - fromEnum 'A' + 10
+
+fromAsciiLowerCharToIx :: Char -> (forall int. (Integral int) => Ix neg pos int)
+fromAsciiLowerCharToIx x = toIx $ fromEnum 'a' - fromEnum x - 1
+
+fromCharToIx :: forall neg pos int. Char -> Maybe (Ix neg pos int)
+fromCharToIx c
+  | isDigit c = Just $ fromIntegral $ fromEnum c - fromEnum '0'
+  | isAsciiUpper c = Just $ fromIntegral $ fromEnum c - fromEnum 'A' + 10
+  | isAsciiLower c = Just $ fromIntegral $ fromEnum 'a' - fromEnum c - 1
   | otherwise = Nothing
 
 instance (KnownNat n, KnownNat m) => Read (GenDigit n m) where
-  readsPrec _ [] = [(GenDigit 0, "")]
-  readsPrec _ (x : xs) = f $ charToDigit x
-    where
-      f (Just y) | check y = [(GenDigit y, xs)]
-      f _ = map (first GenDigit) $ filter (check . fst) $ reads (x : xs)
-      check y = -n <= y && y <= m
-      n = genDigitMin (Proxy @(GenDigit n m))
-      m = genDigitMax (Proxy @(GenDigit n m))
+  readsPrec _ [] = []
+  readsPrec d (x : xs)
+    | x == '0' = [(0, xs)]
+    | isSpace x = readsPrec d xs
+    | isDigit x && fromDigitCharToIx x <= maxBoundIx = [(GenDigit (fromDigitCharToIx x), xs)]
+    | isAsciiUpper x && fromAsciiUpperCharToIx x <= maxBoundIx = [(GenDigit (fromAsciiUpperCharToIx x), xs)]
+    | isAsciiLower x && fromAsciiLowerCharToIx x >= minBoundIx = [(GenDigit (fromAsciiLowerCharToIx x), xs)]
+    | otherwise = []
 
 instance (KnownNat n, KnownNat m) => Digit (GenDigit n m) where
-  fromDigit (UnsafeGenDigit i) = i
-  toDigit i = UnsafeGenDigit $ (i - genDigitMin (Proxy @(GenDigit n m))) `mod` genDigitCnt (Proxy @(GenDigit n m)) + genDigitMin (Proxy @(GenDigit n m))
-  digitMin = UnsafeGenDigit $ genDigitMin (Proxy @(GenDigit n m))
-  digitMax = UnsafeGenDigit $ genDigitMax (Proxy @(GenDigit n m))
+  fromDigit (GenDigit i) = i
+  toDigit i = GenDigit $ (i - n) `mod` c + n
+    where
+      n = minBoundIx p
+      m = maxBoundIx p
+      p = Proxy @(GenDigit n m)
+      c = m + n + 1
+  digitMin = GenDigit (n)
+    where
+      n = minBoundIx p
+      p = Proxy @(GenDigit n m)
+  digitMax = GenDigit m
+    where
+      m = maxBoundIx p
+      p = Proxy @(GenDigit n m)
 
 instance (KnownNat n, KnownNat m) => Num (GenDigit n m) where
-  (+) (UnsafeGenDigit x) (UnsafeGenDigit y) = GenDigit $ x + y
-  (*) (UnsafeGenDigit x) (UnsafeGenDigit y) = GenDigit $ x * y
-  (-) (UnsafeGenDigit x) (UnsafeGenDigit y) = GenDigit $ x - y
-  abs (UnsafeGenDigit x) = GenDigit $ abs x
-  signum (UnsafeGenDigit x) = GenDigit $ signum x
-  fromInteger = GenDigit . fromIntegral
+  GenDigit x + GenDigit y = GenDigit $ x + y
+  GenDigit x * GenDigit y = GenDigit $ x * y
+  GenDigit x - GenDigit y = GenDigit $ x - y
+  abs (GenDigit x) = GenDigit $ abs x
+  signum (GenDigit x) = GenDigit $ signum x
+  fromInteger = GenDigit . fromInteger
 
-carryOn :: forall n m. (KnownNat n, KnownNat m) => Proxy (GenDigit n m) -> (Int -> Int -> Int) -> Int -> Int -> (Int, Int)
-carryOn p op x y = (q, r + m)
+onWithCarry :: forall n m i. (KnownNat n, KnownNat m) => (Ix n m i -> Ix n m i -> Ix n m i) -> Ix n m i -> Ix n m i -> (Ix n m i, Ix n m i)
+onWithCarry op x y = (q, r + n)
   where
     z = x `op` y
-    (q, r) = (z - m) `divMod` genDigitCnt p
-    m = genDigitMin p
+    (q, r) = (z - n) `divMod` c
+    n = minBoundIx
+    m = maxBoundIx
+    c = m - n + 1
 
 instance (KnownNat n, KnownNat m) => Num [GenDigit n m] where
   (+) = f 0
@@ -84,12 +157,13 @@ instance (KnownNat n, KnownNat m) => Num [GenDigit n m] where
       f c [] []
         | c == 0 = []
         | otherwise = [GenDigit c]
-      f c [] ys = f c [GenDigit 0] ys
-      f c xs [] = f c xs [GenDigit 0]
+      f c [] ys = f c [0] ys
+      f c xs [] = f c xs [0]
       f c (GenDigit x : xs) (GenDigit y : ys) = GenDigit z2 : f (c1 + c2) xs ys
         where
-          (c1, z1) = carryOn (Proxy @(GenDigit n m)) (+) x y
-          (c2, z2) = carryOn (Proxy @(GenDigit n m)) (+) z1 c
+          (c1, z1) = onWithCarry (+) x y
+          (c2, z2) = onWithCarry (+) z1 c
+          p = Proxy @(GenDigit n m)
 
   xs * ys = fromInteger $ on (*) fromDigits xs ys
 
@@ -102,8 +176,9 @@ instance (KnownNat n, KnownNat m) => Num [GenDigit n m] where
       f c xs [] = f c xs [GenDigit 0]
       f c (GenDigit x : xs) (GenDigit y : ys) = GenDigit z2 : f (c1 + c2) xs ys
         where
-          (c1, z1) = carryOn (Proxy @(GenDigit n m)) (-) x y
-          (c2, z2) = carryOn (Proxy @(GenDigit n m)) (-) z1 c
+          (c1, z1) = onWithCarry (-) x y
+          (c2, z2) = onWithCarry (-) z1 c
+          p = Proxy @(GenDigit n m)
   abs = fromInteger . abs . fromDigits
   signum = fromInteger . signum . fromDigits
   fromInteger = toDigits
