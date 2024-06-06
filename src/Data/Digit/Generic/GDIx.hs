@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -29,10 +31,12 @@ where
 import Control.Applicative (Alternative ((<|>)))
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Data (Proxy (Proxy))
-import GHC.TypeNats (KnownNat, Nat, natVal)
+import GHC.TypeNats (KnownNat, natVal)
+
+type role GDIx phantom phantom representational
 
 -- | A generic type representing a digit index.
-newtype GDIx (neg :: Nat) (pos :: Nat) int
+newtype GDIx neg pos int
   = -- | A digit index with a value of type @int@.
     GDIx int
   deriving (Eq, Ord, Num, Real, Enum, Integral)
