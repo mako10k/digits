@@ -2,6 +2,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module      : Data.Digit.Generic.GDIx
@@ -90,7 +91,7 @@ newtype StrictGDIx (neg :: Nat) (pos :: Nat) int
   deriving (Eq, Ord, Num, Real, Enum, Integral)
 
 pattern StrictGDIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => int -> StrictGDIx neg pos int
-pattern StrictGDIx int <- UnsafeStrictGDIx int
+pattern StrictGDIx int <- (coerce -> int)
   where
     StrictGDIx = toGDIx
 

@@ -5,7 +5,7 @@
 
 module Data.Digit.Generic
   ( GenDigit (),
-    pattern GenDigit,
+    pattern LenientGenDigit,
   )
 where
 
@@ -22,28 +22,32 @@ import Data.Digit
   )
 import Data.Digit.Generic.GDIx
 import Data.Function (fix, on)
+import Data.List (singleton)
 import GHC.TypeNats (KnownNat)
 
 -- | Represents a generic digit type with negative bound and positive bound.
 data GenDigit neg pos int where
   -- | A digit in the range from @-neg@ to @pos@. (Do not use this constructor directly, use 'GenDigit' instead.)
-  UnsafeGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => StrictGDIx neg pos int -> GenDigit neg pos int
+  StrictGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => StrictGDIx neg pos int -> GenDigit neg pos int
 
 -- | A pattern synonym for 'GenDigit'.
-pattern GenDigit :: LenientGDIx neg pos int -> GenDigit neg pos int
-pattern GenDigit ix <- UnsafeGenDigit (convertGDIx -> ix)
+pattern LenientGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => LenientGDIx neg pos int -> GenDigit neg pos int
+pattern LenientGenDigit ix <- StrictGenDigit (convertGDIx -> ix)
   where
-    GenDigit = UnsafeGenDigit . convertGDIx
+    LenientGenDigit = StrictGenDigit . convertGDIx
+
+{-# COMPLETE LenientGenDigit #-}
+
+pattern GenDigit :: (KnownNat neg, KnownNat pos, Integral int) => int -> GenDigit neg pos int
+pattern GenDigit ix = StrictGenDigit (StrictGDIx ix)
 
 {-# COMPLETE GenDigit #-}
 
 -- | Check if an integer is in the range of a 'GenDigit'.
 instance (KnownNat neg, KnownNat pos, Integral int) => Show (GenDigit neg pos int) where
-  show (GenDigit ix) = toCharGDIx ix 
-    Just ch -> [ch]
-    _ -> "(" ++ show (toInteger ix) ++ ")"
+  show (GenDigit int) = maybe (showParen True (shows (toInteger int)) "") singleton $ toCharGDIx @LenientGDIx @neg @pos @int (fromIntegral int)
   showList [] = showString "0"
-  showList xs = fix go xs
+  showList xs = showString (concatMap show (reverse xs))
     where
       go _ [] = id
       go f (y : ys) = f ys . shows y
@@ -51,24 +55,29 @@ instance (KnownNat neg, KnownNat pos, Integral int) => Show (GenDigit neg pos in
 instance (KnownNat neg, KnownNat pos, Integral int) => Read (GenDigit neg pos int) where
   readsPrec _ [] = []
   readsPrec _ ('0' : xs) = [(0, xs)]
-  readsPrec _ ((fromCharGDIx -> Just ix) : xs) = [(GenDigit ix, xs)]
-  readsPrec d xs = first GenDigit <$> readsPrec d xs
+  readsPrec _ ((fromCharGDIx -> Just ix) : xs) = [(StrictGenDigit ix, xs)]
+  readsPrec d xs = first StrictGenDigit <$> readsPrec d xs
 
 instance (KnownNat neg, KnownNat pos, Integral int) => Digit (GenDigit neg pos int) where
-  fromDigit (GenDigit ix) = fromIntegral ix
-  toDigit int = GenDigit $ StrictGDIx $ (int - fromGDIx minGDIx) `mod` fromGDIx sizeGDIx + fromGDIx minGDIx
-  digitMin = GenDigit minGDIx
-  digitMax = GenDigit maxGDIx
+  fromDigit (GenDigit int) = fromIntegral int
+  toDigit int = GenDigit $ (fromIntegral int - fromGDIx minGDIx') `mod` fromGDIx sizeGDIx' + fromGDIx minGDIx'
+    where
+      minGDIx' :: StrictGDIx neg pos int
+      minGDIx' = minGDIx
+      sizeGDIx' :: StrictGDIx neg pos int
+      sizeGDIx' = sizeGDIx
+  digitMin = StrictGenDigit minGDIx
+  digitMax = StrictGenDigit maxGDIx
 
 instance (KnownNat neg, KnownNat pos, Integral int) => Num (GenDigit neg pos int) where
-  GenDigit x + GenDigit y = GenDigit $ x + y
-  GenDigit x * GenDigit y = GenDigit $ x * y
-  GenDigit x - GenDigit y = GenDigit $ x - y
-  abs (GenDigit x) = GenDigit $ abs x
-  signum (GenDigit x) = GenDigit $ signum x
-  fromInteger = GenDigit . fromInteger
+  LenientGenDigit x + LenientGenDigit y = LenientGenDigit $ x + y
+  LenientGenDigit x * LenientGenDigit y = LenientGenDigit $ x * y
+  LenientGenDigit x - LenientGenDigit y = LenientGenDigit $ x - y
+  abs (LenientGenDigit x) = LenientGenDigit $ abs x
+  signum (LenientGenDigit x) = LenientGenDigit $ signum x
+  fromInteger = LenientGenDigit . fromInteger
 
-onWithCarry :: forall ix neg pos int. (GDIx ix neg pos int) => (ix neg pos int -> ix neg pos int -> ix neg pos int) -> ix neg pos int -> ix neg pos int -> (ix neg pos int, ix neg pos int)
+onWithCarry :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => (LenientGDIx neg pos int -> LenientGDIx neg pos int -> LenientGDIx neg pos int) -> LenientGDIx neg pos int -> LenientGDIx neg pos int -> (LenientGDIx neg pos int, LenientGDIx neg pos int)
 onWithCarry (|?|) x y = second (minGDIx +) ((x |?| y - minGDIx) `divMod` sizeGDIx)
 
 instance (KnownNat pos, KnownNat neg, Integral int) => Num [GenDigit pos neg int] where
@@ -76,10 +85,10 @@ instance (KnownNat pos, KnownNat neg, Integral int) => Num [GenDigit pos neg int
     where
       f c [] []
         | c == 0 = 0
-        | otherwise = [GenDigit c]
+        | otherwise = [LenientGenDigit c]
       f c [] ys = f c [0] ys
       f c xs [] = f c xs [0]
-      f c (GenDigit x : xs) (GenDigit y : ys) = GenDigit z2 : f (c1 + c2) xs ys
+      f c (LenientGenDigit x : xs) (LenientGenDigit y : ys) = LenientGenDigit z2 : f (c1 + c2) xs ys
         where
           (c1, z1) = onWithCarry (+) x y
           (c2, z2) = onWithCarry (+) z1 c
@@ -90,10 +99,10 @@ instance (KnownNat pos, KnownNat neg, Integral int) => Num [GenDigit pos neg int
     where
       f c [] []
         | c == 0 = 0
-        | otherwise = [GenDigit c]
+        | otherwise = [LenientGenDigit c]
       f c [] ys = f c [0] ys
       f c xs [] = f c xs [0]
-      f c (GenDigit x : xs) (GenDigit y : ys) = GenDigit z2 : f (c1 + c2) xs ys
+      f c (LenientGenDigit x : xs) (LenientGenDigit y : ys) = LenientGenDigit z2 : f (c1 + c2) xs ys
         where
           (c1, z1) = onWithCarry (-) x y
           (c2, z2) = onWithCarry (-) z1 c
