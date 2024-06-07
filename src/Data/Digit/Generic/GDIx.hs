@@ -1,123 +1,107 @@
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ViewPatterns #-}
 
 -- |
 -- Module      : Data.Digit.Generic.GDIx
 -- Description : Module for generic digit operations using Index type
 module Data.Digit.Generic.GDIx
   ( -- * GDIx type
-    GDIx (GDIx),
-
-    -- * Conversion functions
-    gdIxToIntegral,
-    integralToGDIx,
-
-    -- * check if GDIx has proper index
-    isProperGDIx,
-
-    -- * GDIx bounds and size
-    minGDIx,
-    maxGDIx,
-    sizeGDIx,
-
-    -- * GDIx and Char conversion
-    gdIxToChar,
-    charToGDIx,
+    LenientGDIx (LenientGDIx),
+    StrictGDIx (),
+    pattern StrictGDIx,
+    GDIx (..),
   )
 where
 
-import Control.Applicative (Alternative ((<|>)))
+import Control.Applicative (Alternative (empty))
+import Control.Monad (guard)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
+import Data.Coerce (coerce)
 import Data.Data (Proxy (Proxy))
+import Data.Function (on)
 import GHC.TypeNats (KnownNat, Nat, natVal)
 
-type role GDIx phantom phantom representational
+class (KnownNat neg, KnownNat pos, Integral int) => GDIx ix neg pos int where
+  fromGDIx :: ix neg pos int -> int
+  toGDIx :: int -> ix neg pos int
+  minGDIx :: ix neg pos int
+  minGDIx = toGDIx (-fromIntegral (natVal (Proxy @neg)))
+  maxGDIx :: ix neg pos int
+  maxGDIx = toGDIx (fromIntegral (natVal (Proxy @pos)))
+  sizeGDIx :: ix neg pos int
+  sizeGDIx = toGDIx (fromIntegral (natVal (Proxy @pos)) - fromIntegral (natVal (Proxy @neg)) + 1)
+  convertGDIx :: (GDIx ix' neg pos int) => ix neg pos int -> ix' neg pos int
+  convertGDIx = toGDIx . fromGDIx
+  idSafeGDIx :: (Alternative t) => ix neg pos int -> t (ix neg pos int)
+  idSafeGDIx ix = ix <$ guard (minGDIx <?= ix && ix <?= maxGDIx)
+    where
+      (<?=) = on (<=) fromGDIx
+  toSafeGDIx :: (Alternative t) => int -> t (ix neg pos int)
+  toSafeGDIx int = toGDIx int <$ guard (fromGDIx' minGDIx <= int && int <= fromGDIx' maxGDIx)
+    where
+      fromGDIx' = fromGDIx :: ix neg pos int -> int
+  toCharGDIx :: (Alternative t) => ix neg pos int -> t Char
+  toCharGDIx = toCharGDIx' . toGDIxSafe' . fromGDIx
+    where
+      toCharGDIx' (Just (LenientGDIx int))
+        | 0 <= int && int <= 9 = pure $ toEnum $ 48 + fromIntegral int
+        | 10 <= int && int <= 36 = pure $ toEnum $ 55 + fromIntegral int
+        | -26 <= int && int <= -1 = pure $ toEnum $ 96 - fromIntegral int
+      toCharGDIx' _ = empty
+      toGDIxSafe' :: (Alternative t) => int -> t (LenientGDIx neg pos int)
+      toGDIxSafe' = toSafeGDIx
+  fromCharGDIx :: (Alternative t) => Char -> t (ix neg pos int)
+  fromCharGDIx ch
+    | isDigit ch = toSafeGDIx $ fromIntegral $ fromEnum ch - 48
+    | isAsciiUpper ch = toSafeGDIx $ fromIntegral $ fromEnum ch - 55
+    | isAsciiLower ch = toSafeGDIx $ fromIntegral $ 96 - fromEnum ch
+    | otherwise = empty
+
+type role LenientGDIx phantom phantom representational
 
 -- | A generic type representing a digit index.
-newtype GDIx (neg :: Nat) (pos :: Nat) int
+newtype LenientGDIx (neg :: Nat) (pos :: Nat) int
   = -- | A digit index with a value of type @int@.
-    GDIx int
+    LenientGDIx int
   deriving (Eq, Ord, Num, Real, Enum, Integral)
 
--- | Convert an integral value to a 'GDIx' value.
-integralToGDIx :: (Integral int, Integral int') => int -> GDIx neg pos int'
-integralToGDIx = GDIx . fromIntegral
+instance (KnownNat neg, KnownNat pos, Integral int) => GDIx LenientGDIx neg pos int where
+  fromGDIx = coerce
+  toGDIx = coerce
 
--- | Convert a 'GDIx' value to an integral value.
-gdIxToIntegral :: (Integral int, Integral int') => GDIx neg pos int -> int'
-gdIxToIntegral (GDIx ix) = fromIntegral ix
+instance (KnownNat neg, KnownNat pos, Integral int) => Read (LenientGDIx neg pos int) where
+  readsPrec d s = [(fromInteger int, t) | (int, t) <- readsPrec d s]
 
--- | Check if a 'GDIx' value has a proper index.
-isProperGDIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => GDIx neg pos int -> Bool
-isProperGDIx ix = minGDIx <= ix && ix <= maxGDIx
+instance (KnownNat neg, KnownNat pos, Integral int) => Show (LenientGDIx neg pos int) where
+  showsPrec d ix = showsPrec d (toInteger ix)
 
--- | Get the minimum 'GDIx' value.
-minGDIx :: forall neg pos int. (KnownNat neg, Integral int) => GDIx neg pos int
-minGDIx = GDIx (-fromIntegral (natVal (Proxy @neg)))
+instance (KnownNat neg, KnownNat pos, Integral int) => Read (StrictGDIx neg pos int) where
+  readsPrec d s = [(ix, t) | (int, t) <- readsPrec d s, ix <- toSafeGDIx (fromInteger int)]
 
--- | Get the maximum 'GDIx' value.
-maxGDIx :: forall neg pos int. (KnownNat pos, Integral int) => GDIx neg pos int
-maxGDIx = GDIx (fromIntegral (natVal (Proxy @pos)))
+instance (KnownNat neg, KnownNat pos, Integral int) => Show (StrictGDIx neg pos int) where
+  showsPrec d ix = showsPrec d (toInteger ix)
 
--- | Get the size of 'GDIx'.
-sizeGDIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => GDIx neg pos int
-sizeGDIx = maxGDIx - minGDIx + 1
+type role StrictGDIx phantom phantom representational
 
-instance (KnownNat neg, KnownNat pos, Integral int) => Read (GDIx neg pos int) where
-  readsPrec d s = do
-    (int :: Int, t) <- readsPrec d s
-    let ix :: GDIx neg pos int = GDIx (fromIntegral int)
-    True <- return $ isProperGDIx ix
-    return (ix, t)
+newtype StrictGDIx (neg :: Nat) (pos :: Nat) int
+  = UnsafeStrictGDIx int
+  deriving (Eq, Ord, Num, Real, Enum, Integral)
 
--- | Convert a 'GDIx' value to a 'Char' value.
-gdIxToChar :: (Integral int) => GDIx neg pos int -> Maybe Char
-gdIxToChar digit = foldl1 (<|>) (map ($ digit) [gdIxToCharDigit, gdIxToCharAsciiUpper, gdIxToCharAsciiLower])
-
--- | Convert a 'Char' value to a 'GDIx' value (only for digit characters)
-gdIxToCharDigit :: (Integral int) => GDIx neg pos int -> Maybe Char
-gdIxToCharDigit ix | 0 <= ix && ix <= 9 = Just $ toEnum $ fromEnum '0' + fromIntegral ix
-gdIxToCharDigit _ = Nothing
-
--- | Convert a 'Char' value to a 'GDIx' value (only for ASCII uppercase characters)
-gdIxToCharAsciiUpper :: (Integral int) => GDIx neg pos int -> Maybe Char
-gdIxToCharAsciiUpper ix | 10 <= ix && ix <= 36 = Just $ toEnum $ fromEnum 'A' + fromIntegral ix - 10
-gdIxToCharAsciiUpper _ = Nothing
-
--- | Convert a 'Char' value to a 'GDIx' value (only for ASCII lowercase characters)
-gdIxToCharAsciiLower :: (Integral int) => GDIx neg pos int -> Maybe Char
-gdIxToCharAsciiLower ix | -26 <= ix && ix <= -1 = Just $ toEnum $ fromEnum 'a' - fromIntegral ix - 1
-gdIxToCharAsciiLower _ = Nothing
-
--- | Convert a 'Char' value to a 'GDIx' value (only for digit characters)
-charDigitToGDIx :: (KnownNat pos, Integral int) => Char -> Maybe (GDIx neg pos int)
-charDigitToGDIx ch
-  | isDigit ch && ix <= maxGDIx = Just ix
-  | otherwise = Nothing
+pattern StrictGDIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => int -> StrictGDIx neg pos int
+pattern StrictGDIx int <- UnsafeStrictGDIx int
   where
-    ix = integralToGDIx $ fromEnum ch - fromEnum '0'
+    StrictGDIx = toGDIx
 
--- | Convert a 'Char' value to a 'GDIx' value (only for ASCII uppercase characters)
-charAsciiUpperToGDIx :: (KnownNat pos, Integral int) => Char -> Maybe (GDIx neg pos int)
-charAsciiUpperToGDIx ch
-  | isAsciiUpper ch && ix <= maxGDIx = Just ix
-  | otherwise = Nothing
-  where
-    ix = integralToGDIx $ fromEnum ch - fromEnum 'A' + 10
+{-# COMPLETE StrictGDIx #-}
 
--- | Convert a 'Char' value to a 'GDIx' value (only for ASCII lowercase characters)
-charAsciiLowerToGDIx :: (KnownNat neg, Integral int) => Char -> Maybe (GDIx neg pos int)
-charAsciiLowerToGDIx ch
-  | isAsciiLower ch && ix > minGDIx = Just ix
-  | otherwise = Nothing
-  where
-    ix = integralToGDIx $ fromEnum 'a' - fromEnum ch - 1
+instance (KnownNat neg, KnownNat pos, Integral int) => GDIx StrictGDIx neg pos int where
+  fromGDIx = coerce
+  toGDIx int = case toSafeGDIx int of
+    Just ix -> ix
+    Nothing -> error "StrictGDIx: out of range"
 
--- | Convert a 'Char' value to a 'GDIx' value
-charToGDIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => Char -> Maybe (GDIx neg pos int)
-charToGDIx (charDigitToGDIx -> Just ix) = Just ix
-charToGDIx (charAsciiUpperToGDIx -> Just ix) = Just ix
-charToGDIx (charAsciiLowerToGDIx -> Just ix) = Just ix
-charToGDIx _ = Nothing
+instance (KnownNat neg, KnownNat pos, Integral int) => Bounded (StrictGDIx neg pos int) where
+  minBound = minGDIx
+  maxBound = maxGDIx
