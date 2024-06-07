@@ -9,7 +9,7 @@
 -- Description : Module for generic digit operations using Index type
 module Data.Digit.Generic.GDIx
   ( -- * GDIx type
-    LenientGDIx (LenientGDIx),
+    LGDIx (LGDIx),
     StrictGDIx (),
     pattern StrictGDIx,
     GDIx (..),
@@ -46,12 +46,12 @@ class (KnownNat neg, KnownNat pos, Integral int) => GDIx ix neg pos int where
   toCharGDIx :: (Alternative t) => ix neg pos int -> t Char
   toCharGDIx = toCharGDIx' . toGDIxSafe' . fromGDIx
     where
-      toCharGDIx' (Just (LenientGDIx int))
+      toCharGDIx' (Just (LGDIx int))
         | 0 <= int && int <= 9 = pure $ toEnum $ 48 + fromIntegral int
         | 10 <= int && int <= 36 = pure $ toEnum $ 55 + fromIntegral int
         | -26 <= int && int <= -1 = pure $ toEnum $ 96 - fromIntegral int
       toCharGDIx' _ = empty
-      toGDIxSafe' :: (Alternative t) => int -> t (LenientGDIx neg pos int)
+      toGDIxSafe' :: (Alternative t) => int -> t (LGDIx neg pos int)
       toGDIxSafe' = toSafeGDIx
   fromCharGDIx :: (Alternative t) => Char -> t (ix neg pos int)
   fromCharGDIx ch
@@ -60,22 +60,22 @@ class (KnownNat neg, KnownNat pos, Integral int) => GDIx ix neg pos int where
     | isAsciiLower ch = toSafeGDIx $ fromIntegral $ 96 - fromEnum ch
     | otherwise = empty
 
-type role LenientGDIx phantom phantom representational
+type role LGDIx phantom phantom representational
 
 -- | A generic type representing a digit index.
-newtype LenientGDIx (neg :: Nat) (pos :: Nat) int
+newtype LGDIx (neg :: Nat) (pos :: Nat) int
   = -- | A digit index with a value of type @int@.
-    LenientGDIx int
+    LGDIx int
   deriving (Eq, Ord, Num, Real, Enum, Integral)
 
-instance (KnownNat neg, KnownNat pos, Integral int) => GDIx LenientGDIx neg pos int where
+instance (KnownNat neg, KnownNat pos, Integral int) => GDIx LGDIx neg pos int where
   fromGDIx = coerce
   toGDIx = coerce
 
-instance (KnownNat neg, KnownNat pos, Integral int) => Read (LenientGDIx neg pos int) where
+instance (KnownNat neg, KnownNat pos, Integral int) => Read (LGDIx neg pos int) where
   readsPrec d s = [(fromInteger int, t) | (int, t) <- readsPrec d s]
 
-instance (KnownNat neg, KnownNat pos, Integral int) => Show (LenientGDIx neg pos int) where
+instance (KnownNat neg, KnownNat pos, Integral int) => Show (LGDIx neg pos int) where
   showsPrec d ix = showsPrec d (toInteger ix)
 
 instance (KnownNat neg, KnownNat pos, Integral int) => Read (StrictGDIx neg pos int) where

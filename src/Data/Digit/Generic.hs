@@ -21,7 +21,7 @@ import Data.Digit
       ),
   )
 import Data.Digit.Generic.GDIx
-import Data.Function (fix, on)
+import Data.Function (on)
 import Data.List (singleton)
 import GHC.TypeNats (KnownNat)
 
@@ -31,7 +31,7 @@ data GenDigit neg pos int where
   StrictGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => StrictGDIx neg pos int -> GenDigit neg pos int
 
 -- | A pattern synonym for 'GenDigit'.
-pattern LenientGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => LenientGDIx neg pos int -> GenDigit neg pos int
+pattern LenientGenDigit :: (KnownNat neg, KnownNat pos, Integral int) => LGDIx neg pos int -> GenDigit neg pos int
 pattern LenientGenDigit ix <- StrictGenDigit (convertGDIx -> ix)
   where
     LenientGenDigit = StrictGenDigit . convertGDIx
@@ -45,12 +45,9 @@ pattern GenDigit ix = StrictGenDigit (StrictGDIx ix)
 
 -- | Check if an integer is in the range of a 'GenDigit'.
 instance (KnownNat neg, KnownNat pos, Integral int) => Show (GenDigit neg pos int) where
-  show (GenDigit int) = maybe (showParen True (shows (toInteger int)) "") singleton $ toCharGDIx @LenientGDIx @neg @pos @int (fromIntegral int)
+  show (GenDigit int) = maybe (showParen True (shows (toInteger int)) "") singleton $ toCharGDIx @LGDIx @neg @pos @int (fromIntegral int)
   showList [] = showString "0"
   showList xs = showString (concatMap show (reverse xs))
-    where
-      go _ [] = id
-      go f (y : ys) = f ys . shows y
 
 instance (KnownNat neg, KnownNat pos, Integral int) => Read (GenDigit neg pos int) where
   readsPrec _ [] = []
@@ -77,7 +74,7 @@ instance (KnownNat neg, KnownNat pos, Integral int) => Num (GenDigit neg pos int
   signum (LenientGenDigit x) = LenientGenDigit $ signum x
   fromInteger = LenientGenDigit . fromInteger
 
-onWithCarry :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => (LenientGDIx neg pos int -> LenientGDIx neg pos int -> LenientGDIx neg pos int) -> LenientGDIx neg pos int -> LenientGDIx neg pos int -> (LenientGDIx neg pos int, LenientGDIx neg pos int)
+onWithCarry :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => (LGDIx neg pos int -> LGDIx neg pos int -> LGDIx neg pos int) -> LGDIx neg pos int -> LGDIx neg pos int -> (LGDIx neg pos int, LGDIx neg pos int)
 onWithCarry (|?|) x y = second (minGDIx +) ((x |?| y - minGDIx) `divMod` sizeGDIx)
 
 instance (KnownNat pos, KnownNat neg, Integral int) => Num [GenDigit pos neg int] where
