@@ -11,9 +11,8 @@ module Data.Digit.Generic
   )
 where
 
-import Data.Bifunctor (Bifunctor (first, second))
+import Data.Bifunctor (Bifunctor (..))
 import Data.Char (isDigit, isLower, isUpper)
-import Data.Coerce (coerce)
 import Data.Data (Proxy (Proxy))
 import Data.Digit
   ( Digit
@@ -25,14 +24,26 @@ import Data.Digit
         toDigits
       ),
   )
-import Data.Digit.Generic.GDIx (GDIx (GDIx))
 import Data.Function (on)
-import GHC.TypeNats (KnownNat, natVal)
+import GHC.TypeNats (KnownNat, Nat, natVal)
 
--- | Represents a generic digit type with negative bound and positive bound.
-data GenDigit neg pos int where
-  -- | A digit in the range from @-neg@ to @pos@. (Do not use this constructor directly, use 'GenDigit' instead.)
-  UnsafeGenDigit :: int -> GenDigit neg pos int
+-- * Data Types
+
+type role GenDigit phantom phantom representational
+
+newtype GenDigit neg pos int
+  = -- | A digit in the range from @-neg@ to @pos@. (Do not use this constructor directly, use 'GenDigit' instead.)
+    UnsafeGenDigit int
+  deriving (Eq, Ord, Num, Real, Enum, Integral)
+
+type role GDIx phantom phantom representational
+
+newtype GDIx (neg :: Nat) (pos :: Nat) int
+  = -- | A digit index with a value of type @int@.
+    GDIx int
+  deriving (Eq, Ord, Num, Real, Enum, Integral, Functor)
+
+-- * Constructors
 
 pattern GenDigit :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => int -> GenDigit neg pos int
 pattern GenDigit int <- UnsafeGenDigit int
@@ -56,13 +67,23 @@ pattern GenDigitMod int <- UnsafeGenDigit int
 {-# COMPLETE GenDigitMod #-}
 
 pattern GenDigitIx :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => GDIx neg pos int -> GenDigit neg pos int
-pattern GenDigitIx ix <- GenDigit (coerce -> ix)
+pattern GenDigitIx ix <- UnsafeGenDigit (GDIx -> ix)
   where
-    GenDigitIx = GenDigit . coerce
+    GenDigitIx (GDIx int) = UnsafeGenDigit int
 
 {-# COMPLETE GenDigitIx #-}
 
--- | Check if an integer is in the range of a 'GenDigit'.
+-- * Instances
+
+instance Applicative (GDIx neg pos) where
+  pure = GDIx
+  (<*>) :: forall a b. GDIx neg pos (a -> b) -> GDIx neg pos a -> GDIx neg pos b
+  GDIx f <*> GDIx x = GDIx (f x)
+
+instance Monad (GDIx neg pos) where
+  GDIx x >>= f = f x
+  return = pure
+
 instance (KnownNat neg, KnownNat pos, Integral int) => Show (GenDigit neg pos int) where
   show (GenDigit int)
     | 0 <= int && int <= 9 = [toEnum (fromIntegral int + fromEnum '0')]
@@ -72,6 +93,12 @@ instance (KnownNat neg, KnownNat pos, Integral int) => Show (GenDigit neg pos in
   showList [] = showString "0"
   showList xs = showString (concatMap show (reverse xs))
 
+instance (Integral int) => Show (GDIx neg pos int) where
+  show = show . toInteger
+
+instance (Integral int) => Read (GDIx neg pos int) where
+  readsPrec i s = first fromInteger <$> readsPrec i s
+
 instance (KnownNat neg, KnownNat pos, Integral int) => Read (GenDigit neg pos int) where
   readsPrec _ [] = []
   readsPrec _ (x : xs)
@@ -80,11 +107,15 @@ instance (KnownNat neg, KnownNat pos, Integral int) => Read (GenDigit neg pos in
     | isLower x = [(GenDigit (fromIntegral (-fromEnum x + fromEnum 'a' - 1)), xs)]
   readsPrec d xs = first (GenDigit . fromInteger) <$> readsPrec d xs
 
+instance (KnownNat neg, KnownNat pos, Integral int) => Bounded (GenDigit neg pos int) where
+  minBound = GenDigit (fromIntegral (natVal (Proxy @neg)))
+  maxBound = GenDigit (fromIntegral (natVal (Proxy @pos)))
+
 instance (KnownNat neg, KnownNat pos, Integral int) => Digit (GenDigit neg pos int) where
   fromDigit (GenDigit int) = fromIntegral int
   toDigit int = GenDigit (fromIntegral int)
-  digitMin = GenDigit (-fromIntegral (natVal (Proxy @neg)))
-  digitMax = GenDigit (fromIntegral (natVal (Proxy @pos)))
+  digitMin = minBound
+  digitMax = maxBound
 
 onWithCarry :: forall neg pos int. (KnownNat neg, KnownNat pos, Integral int) => (GDIx neg pos int -> GDIx neg pos int -> GDIx neg pos int) -> GDIx neg pos int -> GDIx neg pos int -> (GDIx neg pos int, GDIx neg pos int)
 onWithCarry (|?|) x y = second (neg +) ((x |?| y - neg) `divMod` (pos - neg + 1))

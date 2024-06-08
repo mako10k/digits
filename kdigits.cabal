@@ -59,7 +59,7 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  Data.Digit Data.Digit.Generic Data.Digit.Generic.GDIx
+    exposed-modules:  Data.Digit Data.Digit.Generic
 
     -- Modules included in this library but not exported.
     -- other-modules:
